@@ -32,7 +32,7 @@ def remove_all_pods(api, node_name, k8s_version, poll=5):
     """Removes all Kubernetes pods from the specified node."""
     pods = get_pods_on_node(api, node_name)
 
-    logger.debug('Number of pods to delete: ' + str(len(pods)))
+    logger.debug(f'Number of pods to delete: {len(pods)}')
 
     evict_until_completed(api, pods, k8s_version, poll)
     wait_until_empty(api, node_name, poll)
@@ -40,20 +40,22 @@ def remove_all_pods(api, node_name, k8s_version, poll=5):
 
 def pod_is_evictable(pod):
     if pod.metadata.annotations is not None and pod.metadata.annotations.get(MIRROR_POD_ANNOTATION_KEY):
-        logger.info("Skipping mirror pod {}/{}".format(pod.metadata.namespace, pod.metadata.name))
+        logger.info(
+            f"Skipping mirror pod {pod.metadata.namespace}/{pod.metadata.name}"
+        )
         return False
     if pod.metadata.owner_references is None:
         return True
     for ref in pod.metadata.owner_references:
         if ref.controller is not None and ref.controller:
             if ref.kind == CONTROLLER_KIND_DAEMON_SET:
-                logger.info("Skipping DaemonSet {}/{}".format(pod.metadata.namespace, pod.metadata.name))
+                logger.info(f"Skipping DaemonSet {pod.metadata.namespace}/{pod.metadata.name}")
                 return False
     return True
 
 
 def get_pods_on_node(api, node_name):
-    field_selector = 'spec.nodeName=' + node_name
+    field_selector = f'spec.nodeName={node_name}'
     pods = api.list_pod_for_all_namespaces(watch=False, field_selector=field_selector)
     return [pod for pod in pods.items if pod_is_evictable(pod)]
 
@@ -70,8 +72,9 @@ def evict_until_completed(api, pods, k8s_version, poll):
 def evict_pods(api, pods, k8s_version):
     remaining = []
     for pod in pods:
-        logger.info('Evicting pod {} in namespace {}'.format(
-            pod.metadata.name, pod.metadata.namespace))
+        logger.info(
+            f'Evicting pod {pod.metadata.name} in namespace {pod.metadata.namespace}'
+        )
         body = {
             'apiVersion': 'policy/v1beta1',
             'kind': 'Eviction',
@@ -84,7 +87,10 @@ def evict_pods(api, pods, k8s_version):
         try:
             if int(k8s_version.minor.replace('+', '')) < 16:
                 api.create_namespaced_pod_eviction(
-                    pod.metadata.name + '-eviction', pod.metadata.namespace, body)
+                    f'{pod.metadata.name}-eviction',
+                    pod.metadata.namespace,
+                    body,
+                )
             else:
                 api.create_namespaced_pod_eviction(
                     pod.metadata.name, pod.metadata.namespace, body)
@@ -109,8 +115,15 @@ def wait_until_empty(api, node_name, poll):
         if len(pods) <= 0:
             logger.info("All pods evicted successfully")
             return
-        logger.debug("Still waiting for deletion of the following pods: %s", ", ".join(
-            map(lambda pod: pod.metadata.namespace + "/" + pod.metadata.name, pods)))
+        logger.debug(
+            "Still waiting for deletion of the following pods: %s",
+            ", ".join(
+                map(
+                    lambda pod: f"{pod.metadata.namespace}/{pod.metadata.name}",
+                    pods,
+                )
+            ),
+        )
         time.sleep(poll)
 
 
@@ -118,7 +131,7 @@ def node_exists(api, node_name):
     """Determines whether the specified node is still part of the cluster."""
     nodes = api.list_node(pretty=True).items
     node = next((n for n in nodes if n.metadata.name == node_name), None)
-    return False if not node else True
+    return bool(node)
 
 
 def abandon_lifecycle_action(asg_client, auto_scaling_group_name, lifecycle_hook_name, instance_id):
